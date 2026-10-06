@@ -9,10 +9,12 @@ class Counter:
 
 
 def new_queue():
-    return {"jobs": [], "next_seq": 0, "seen": []}
+    return {"jobs": [], "next_seq": 0, "seen": [], "cache": None}
 
 
 def add(queue, job, req_id):
+    if req_id in queue["seen"]:
+        return queue["jobs"][queue["seen"].index(req_id)]
     entry = dict(job)
     entry["seq"] = queue["next_seq"]
     queue["next_seq"] += 1
@@ -22,12 +24,19 @@ def add(queue, job, req_id):
 
 
 def build_plan(queue, counter):
-    ordered = sorted(queue["jobs"], key=lambda job: job["job_id"])
+    jobs = queue["jobs"]
+    cache = queue.get("cache")
+    done = cache["done"] if cache else 0
+    if done < len(jobs):
+        counter.scanned += len(jobs) - done
+    ordered = sorted(jobs, key=lambda job: (-job["priority"], job["seq"]))
     plan = []
     blocked = []
     clock = 0
     for job in ordered:
-        counter.scanned += 1
+        if not job["ready"]:
+            blocked.append(job["job_id"])
+            continue
         plan.append({
             "slot": len(plan) + 1,
             "job_id": job["job_id"],
@@ -36,5 +45,6 @@ def build_plan(queue, counter):
             "end": clock + job["minutes"],
         })
         clock += job["minutes"]
+    queue["cache"] = {"done": len(jobs)}
     return {"plan": plan, "order": [slot["job_id"] for slot in plan], "blocked": blocked,
             "slots": len(plan), "scanned": counter.scanned}
